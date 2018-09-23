@@ -1,0 +1,35 @@
+language: go
+
+go:
+  - "1.11"
+
+os:
+  - linux
+
+services:
+  - docker
+
+before_install:
+  - if [[ $TRAVIS_OS_NAME == linux ]]; then wget -qO - https://packages.confluent.io/deb/5.0/archive.key | sudo apt-key add - ; fi
+  - if [[ $TRAVIS_OS_NAME == linux ]]; then sudo add-apt-repository "deb [arch=amd64] https://packages.confluent.io/deb/5.0 stable main" -y ; fi
+  - if [[ $TRAVIS_OS_NAME == linux ]]; then sudo apt-get update -q ; fi
+  - if [[ $TRAVIS_OS_NAME == linux ]]; then sudo apt-get install librdkafka-dev -y ; fi
+
+cache:
+  directories:
+    - ${GOPATH}/pkg/mod
+
+jobs:
+  include:
+    - stage: test
+      if: type == pull_request
+      script: make services test
+      env:
+        - GO111MODULE=on
+
+    - stage: test_and_cover
+      name: "Test (with coverage)"
+      if: type != pull_request
+      script: make services cover publish_cover
+      env:
+        - GO111MODULE=on
