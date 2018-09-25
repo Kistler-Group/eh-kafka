@@ -138,12 +138,15 @@ func (b *EventBus) PublishEvent(ctx context.Context, event eh.Event) error {
 		return ErrCouldNotPublishEvent(err)
 	}
 
+	b.producer.Flush(0)
+
 	// wait for deliver event
 	select {
 	case <-deliveryChan:
 	case <-time.After(b.timeout):
-		panic("Cannot add handler: timeout")
+		panic("Cannot deliver event: timeout")
 	}
+	close(deliveryChan)
 
 	return nil
 }

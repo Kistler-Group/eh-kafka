@@ -49,20 +49,22 @@ func TestEventBus(t *testing.T) {
 		"queue.buffering.max.messages": 1,
 		"fetch.wait.max.ms":            1,
 		"fetch.min.bytes":              1,
-		"session.timeout.ms":           6000,
+		"session.timeout.ms":           30000,
 		"default.topic.config":         gokafka.ConfigMap{"auto.offset.reset": "latest"},
 	}
 
-	bus1, err := NewEventBus(config, time.Second*10, func(eh.Event) string { return topic.String() }, func(eh.EventHandler) string { return topic.String() })
+	timeout := time.Second * 30
+
+	bus1, err := NewEventBus(config, timeout, func(eh.Event) string { return topic.String() }, func(eh.EventHandler) string { return topic.String() })
 	if err != nil {
 		t.Fatal("there should be no error:", err)
 	}
 
-	bus2, err := NewEventBus(config, time.Second*10, func(eh.Event) string { return topic.String() }, func(eh.EventHandler) string { return topic.String() })
+	bus2, err := NewEventBus(config, timeout, func(eh.Event) string { return topic.String() }, func(eh.EventHandler) string { return topic.String() })
 	if err != nil {
 		t.Fatal("there should be no error:", err)
 	}
 
-	eventbus.AcceptanceTest(t, bus1, bus2)
+	eventbus.AcceptanceTest(t, bus1, bus2, timeout)
 
 }
