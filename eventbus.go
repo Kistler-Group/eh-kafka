@@ -29,11 +29,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"time"
 
-	gokafka "github.com/confluentinc/confluent-kafka-go/kafka"
+	sarama "github.com/Shopify/sarama"
+	cluster "github.com/bsm/sarama-cluster"
 
 	"github.com/globalsign/mgo/bson"
 
@@ -70,12 +70,13 @@ func (e Error) Error() string {
 // EventBus is an event bus that notifies registered EventHandlers of
 // published events. It will use the SimpleEventHandlingStrategy by default.
 type EventBus struct {
-	config            *gokafka.ConfigMap
-	producerTopicFunc func(event eh.Event) string
-	consumerTopicFunc func(event eh.EventHandler) string
-	timeout           time.Duration
+	brokers            []string
+	config             *sarama.Config
+	producerTopicFunc  func(event eh.Event) string
+	consumerTopicsFunc func(event eh.EventHandler) []string
+	timeout            time.Duration
 
-	producer *gokafka.Producer
+	producer sarama.SyncProducer
 
 	registered   map[eh.EventHandlerType]struct{}
 	registeredMu sync.RWMutex
@@ -83,20 +84,23 @@ type EventBus struct {
 }
 
 // NewEventBus creates a EventBus.
-func NewEventBus(config *gokafka.ConfigMap, timeout time.Duration, producerTopicFunc func(event eh.Event) string, consumerTopicFunc func(event eh.EventHandler) string) (*EventBus, error) {
-	producer, err := gokafka.NewProducer(config)
+func NewEventBus(brokers []string, config *sarama.Config, timeout time.Duration, producerTopicFunc func(event eh.Event) string, consumerTopicsFunc func(event eh.EventHandler) []string) (*EventBus, error) {
+	config.Producer.Return.Successes = true
+
+	producer, err := sarama.NewSyncProducer(brokers, config)
 	if err != nil {
 		return nil, err
 	}
 
 	return &EventBus{
-		config:            config,
-		timeout:           timeout,
-		producerTopicFunc: producerTopicFunc,
-		consumerTopicFunc: consumerTopicFunc,
-		producer:          producer,
-		registered:        map[eh.EventHandlerType]struct{}{},
-		errCh:             make(chan Error, 100),
+		brokers:            brokers,
+		config:             config,
+		timeout:            timeout,
+		producerTopicFunc:  producerTopicFunc,
+		consumerTopicsFunc: consumerTopicsFunc,
+		producer:           producer,
+		registered:         map[eh.EventHandlerType]struct{}{},
+		errCh:              make(chan Error, 100),
 	}, nil
 }
 
@@ -125,42 +129,28 @@ func (b *EventBus) PublishEvent(ctx context.Context, event eh.Event) error {
 	if err != nil {
 		return errors.New("could not marshal event: " + err.Error())
 	}
-
-	topic := b.producerTopicFunc(event)
-	deliveryChan := make(chan gokafka.Event)
-
-	err = b.producer.Produce(&gokafka.Message{
-		TopicPartition: gokafka.TopicPartition{Topic: &topic, Partition: gokafka.PartitionAny},
-		Value:          data,
-	}, deliveryChan)
+	_, _, err = b.producer.SendMessage(&sarama.ProducerMessage{
+		Topic: b.producerTopicFunc(event),
+		Value: sarama.StringEncoder(data),
+	})
 
 	if err != nil {
 		return ErrCouldNotPublishEvent(err)
 	}
-
-	b.producer.Flush(0)
-
-	// wait for deliver event
-	select {
-	case <-deliveryChan:
-	case <-time.After(b.timeout):
-		panic("Cannot deliver event: timeout")
-	}
-	close(deliveryChan)
 
 	return nil
 }
 
 // AddHandler implements the AddHandler method of the eventhorizon.EventBus interface.
 func (b *EventBus) AddHandler(m eh.EventMatcher, h eh.EventHandler) {
-	sub := b.subscription(m, h, false)
-	b.runHandle(m, h, sub)
+	consumer := b.subscription(m, h, false)
+	b.runHandle(m, h, consumer)
 }
 
 // AddObserver implements the AddObserver method of the eventhorizon.EventBus interface.
 func (b *EventBus) AddObserver(m eh.EventMatcher, h eh.EventHandler) {
-	sub := b.subscription(m, h, true)
-	b.runHandle(m, h, sub)
+	consumer := b.subscription(m, h, true)
+	b.runHandle(m, h, consumer)
 }
 
 // Errors returns an error channel where async handling errors are sent.
@@ -169,7 +159,7 @@ func (b *EventBus) Errors() <-chan Error {
 }
 
 // Checks the matcher and handler and gets the event subscription.
-func (b *EventBus) subscription(m eh.EventMatcher, h eh.EventHandler, observer bool) *gokafka.Consumer {
+func (b *EventBus) subscription(m eh.EventMatcher, h eh.EventHandler, observer bool) *cluster.Consumer {
 	b.registeredMu.Lock()
 	defer b.registeredMu.Unlock()
 
@@ -185,40 +175,29 @@ func (b *EventBus) subscription(m eh.EventMatcher, h eh.EventHandler, observer b
 	b.registered[h.HandlerType()] = struct{}{}
 
 	clientID := eh.NewUUID()
-	id := string(h.HandlerType())
+	group := string(h.HandlerType())
 	if observer { // Generate unique ID for each observer.
-		id = fmt.Sprintf("%s-%s", id, clientID)
+		group = fmt.Sprintf("%s-%s", group, clientID)
 	}
 
-	subcfg := gokafka.ConfigMap{}
-	rsubcfg := reflect.ValueOf(subcfg)
+	config := cluster.NewConfig()
+	config.Config = *b.config
+	config.Config.ClientID = clientID.String()
+	config.Consumer.Return.Errors = true
+	config.Group.Return.Notifications = true
 
-	rcfg := reflect.ValueOf(*b.config)
-	for _, key := range rcfg.MapKeys() {
-		rsubcfg.SetMapIndex(key, rcfg.MapIndex(key))
-	}
-
-	rsubcfg.SetMapIndex(reflect.ValueOf("client.id"), reflect.ValueOf(clientID.String()))
-	rsubcfg.SetMapIndex(reflect.ValueOf("group.id"), reflect.ValueOf(id))
-	rsubcfg.SetMapIndex(reflect.ValueOf("go.events.channel.enable"), reflect.ValueOf(true))
-	rsubcfg.SetMapIndex(reflect.ValueOf("go.application.rebalance.enable"), reflect.ValueOf(true))
-
-	consumer, err := gokafka.NewConsumer(&subcfg)
+	consumer, err := cluster.NewConsumer(b.brokers, group, b.consumerTopicsFunc(h), config)
 	if err != nil {
-		panic("could not create consumer: " + err.Error())
-	}
-	topic := b.consumerTopicFunc(h)
-	if err := consumer.Subscribe(topic, nil); err != nil {
-		panic("could not subscribe to topic '" + topic + "': " + err.Error())
+		panic(fmt.Sprintf("cannot create consumer for %v: %v", h.HandlerType(), err))
 	}
 	return consumer
 }
 
 // wait for for first event from handle because registering to kafka is too slow
-func (b *EventBus) runHandle(m eh.EventMatcher, h eh.EventHandler, sub *gokafka.Consumer) {
+func (b *EventBus) runHandle(m eh.EventMatcher, h eh.EventHandler, consumer *cluster.Consumer) {
 	sync := make(chan interface{})
 	go func(sync chan interface{}) {
-		b.handle(m, h, sub, func() {
+		b.handle(m, h, consumer, func() {
 			if sync != nil {
 				close(sync)
 				sync = nil
@@ -233,31 +212,28 @@ func (b *EventBus) runHandle(m eh.EventMatcher, h eh.EventHandler, sub *gokafka.
 }
 
 // Handles all events coming in on the channel.
-func (b *EventBus) handle(m eh.EventMatcher, h eh.EventHandler, sub *gokafka.Consumer, syncFunc func()) {
+func (b *EventBus) handle(m eh.EventMatcher, h eh.EventHandler, consumer *cluster.Consumer, rebalanceOk func()) {
 	run := true
 	for run == true {
 		select {
-		case ev := <-sub.Events():
-			switch e := ev.(type) {
-			case gokafka.AssignedPartitions:
-				sub.Assign(e.Partitions)
-			case gokafka.RevokedPartitions:
-				sub.Unassign()
-			case *gokafka.Message:
-				b.handleMessage(m, h, sub, e)
-			case gokafka.PartitionEOF:
-			case gokafka.Error:
-				select {
-				case b.errCh <- Error{Err: errors.New("could not receive: " + e.Error())}:
-				default:
-				}
+		case msg, ok := <-consumer.Messages():
+			if ok {
+				b.handleMessage(m, h, consumer, msg)
 			}
-			syncFunc()
+		case ntf := <-consumer.Notifications():
+			if ntf.Type == cluster.RebalanceOK {
+				rebalanceOk()
+			}
+		case err := <-consumer.Errors():
+			select {
+			case b.errCh <- Error{Err: errors.New("could not receive: " + err.Error())}:
+			default:
+			}
 		}
 	}
 }
 
-func (b *EventBus) handleMessage(m eh.EventMatcher, h eh.EventHandler, sub *gokafka.Consumer, msg *gokafka.Message) {
+func (b *EventBus) handleMessage(m eh.EventMatcher, h eh.EventHandler, consumer *cluster.Consumer, msg *sarama.ConsumerMessage) {
 	// Manually decode the raw BSON event.
 	data := bson.Raw{
 		Kind: 3,
@@ -292,7 +268,7 @@ func (b *EventBus) handleMessage(m eh.EventMatcher, h eh.EventHandler, sub *goka
 	ctx := eh.UnmarshalContext(e.Context)
 
 	if !m(event) {
-		sub.CommitMessage(msg)
+		consumer.MarkOffset(msg, "")
 		return
 	}
 
@@ -305,7 +281,7 @@ func (b *EventBus) handleMessage(m eh.EventMatcher, h eh.EventHandler, sub *goka
 		return
 	}
 
-	sub.CommitMessage(msg)
+	consumer.MarkOffset(msg, "")
 }
 
 // evt is the internal event used on the wire only.

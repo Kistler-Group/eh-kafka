@@ -29,38 +29,31 @@ import (
 	"testing"
 	"time"
 
-	gokafka "github.com/confluentinc/confluent-kafka-go/kafka"
+	sarama "github.com/Shopify/sarama"
 	eh "github.com/looplab/eventhorizon"
 	"github.com/looplab/eventhorizon/eventbus"
 )
 
 func TestEventBus(t *testing.T) {
 	// Connect to localhost if not running inside docker
-	bootstrapServer := os.Getenv("KAFKA_EMULATOR_BOOTSTRAP_SERVER")
-	if bootstrapServer == "" {
-		bootstrapServer = "localhost"
+	broker := os.Getenv("KAFKA_EMULATOR_BOOTSTRAP_SERVER")
+	if broker == "" {
+		broker = "localhost:9092"
 	}
 
 	topic := eh.NewUUID()
 
-	config := &gokafka.ConfigMap{
-		"bootstrap.servers":            bootstrapServer,
-		"linger.ms":                    1,
-		"queue.buffering.max.messages": 1,
-		"fetch.wait.max.ms":            1,
-		"fetch.min.bytes":              1,
-		"session.timeout.ms":           30000,
-		"default.topic.config":         gokafka.ConfigMap{"auto.offset.reset": "latest"},
-	}
+	config := sarama.NewConfig()
+	config.Producer.Flush.MaxMessages = 1
 
 	timeout := time.Second * 30
 
-	bus1, err := NewEventBus(config, timeout, func(eh.Event) string { return topic.String() }, func(eh.EventHandler) string { return topic.String() })
+	bus1, err := NewEventBus([]string{broker}, config, timeout, func(eh.Event) string { return topic.String() }, func(eh.EventHandler) []string { return []string{topic.String()} })
 	if err != nil {
 		t.Fatal("there should be no error:", err)
 	}
 
-	bus2, err := NewEventBus(config, timeout, func(eh.Event) string { return topic.String() }, func(eh.EventHandler) string { return topic.String() })
+	bus2, err := NewEventBus([]string{broker}, config, timeout, func(eh.Event) string { return topic.String() }, func(eh.EventHandler) []string { return []string{topic.String()} })
 	if err != nil {
 		t.Fatal("there should be no error:", err)
 	}
