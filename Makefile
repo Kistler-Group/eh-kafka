@@ -9,8 +9,14 @@ test_docker:
 .PHONY: test_docker
 
 cover:
-	go list -f '{{if len .TestGoFiles}}"go test -coverprofile={{.Dir}}/.coverprofile {{.ImportPath}}"{{end}}' ./... | xargs -L 1 sh -c
+	go test -race -covermode=atomic -coverprofile=coverage.txt
 .PHONY: cover
+
+publish-coverage:
+	curl -s https://codecov.io/bash > .codecov && \
+	chmod +x .codecov && \
+	./.codecov -f coverage.txt
+.PHONY: publish-coverage
 
 services:
 	docker-compose pull zookeeper kafka
@@ -22,6 +28,7 @@ stop:
 .PHONY: stop
 
 clean:
-	@find . -name \.coverprofile -type f -delete
-	@rm -f gover.coverprofile
+	@find . -name \.covdecov -type f -delete
+	@find . -name \.coverage.txt -type f -delete
+	@rm -f gover.coverage
 .PHONY: clean

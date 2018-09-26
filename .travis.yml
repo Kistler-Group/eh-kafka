@@ -24,6 +24,6 @@ jobs:
     - stage: test_and_cover
       name: "Test (with coverage)"
       if: type != pull_request
-      script: make services cover
+      script: make services cover publish-coverage
       env:
         - GO111MODULE=on
