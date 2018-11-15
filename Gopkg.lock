@@ -2,12 +2,12 @@
 
 
 [[projects]]
-  digest = "1:aef23e9ea9f154b965b9792e32c86f315c2c689883ead4eeca8a182f6edfdfbc"
+  digest = "1:6981402aef27693f4b2ec619117abd263fde29f8c1dfac46eef0f35038d37513"
   name = "github.com/Shopify/sarama"
   packages = ["."]
   pruneopts = "UT"
-  revision = "a6144ae922fd99dd0ea5046c8137acfb7fab0914"
-  version = "v1.18.0"
+  revision = "ec843464b50d4c8b56403ec9d589cf41ea30e722"
+  version = "v1.19.0"
 
 [[projects]]
   digest = "1:526d64d0a3ac6c24875724a9355895be56a21f89a5d3ab5ba88d91244269a7d8"
@@ -51,14 +51,14 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:7fb51688eadf38272411852d7a2b3538c7caff53309abee6c0964a83c00fe69e"
+  digest = "1:43571f2cd5b2103074bd2cc37edbb72ee5ee16cf661ed3de0e620d27272fd77e"
   name = "github.com/globalsign/mgo"
   packages = [
     "bson",
     "internal/json",
   ]
   pruneopts = "UT"
-  revision = "1ca0a4f7cbcbe61c005d1bd43fdd8bb8b71df6bc"
+  revision = "eeefdecb41b842af6dc652aaea4026e8403e62df"
 
 [[projects]]
   branch = "master"
@@ -86,7 +86,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:041c4610152bedbe89b0790f77436574f91b10b1f7a63b86adebb5d0e7d62737"
+  digest = "1:8aeac803cb5426789cfb294c676394002ec983d28ee26f04755e728430c51ae5"
   name = "github.com/looplab/eventhorizon"
   packages = [
     ".",
@@ -94,26 +94,26 @@
     "mocks",
   ]
   pruneopts = "UT"
-  revision = "cafa6c8108caa98eee2b37af4dca01688acb6e31"
+  revision = "6674e74478cfc2fc1f170d8f8a500f1c8ae87737"
 
 [[projects]]
-  digest = "1:4f0885b3f0dba96128a09a6f4b4231c42688fbd05f323224c6aa5adc9f4e87bf"
+  digest = "1:e7e972f4296dba80d993585baa1e1fcb5fbbaa6f5ef36ff7636d9c42ff472bdc"
   name = "github.com/pierrec/lz4"
   packages = [
     ".",
     "internal/xxh32",
   ]
   pruneopts = "UT"
-  revision = "bb6bfd13c6a262f1943c0446eb25b7f54c1fb9a2"
-  version = "v2.0.6"
+  revision = "635575b42742856941dbc767b44905bb9ba083f6"
+  version = "v2.0.7"
 
 [[projects]]
   branch = "master"
-  digest = "1:c4556a44e350b50a490544d9b06e9fba9c286c21d6c0e47f54f3a9214597298c"
+  digest = "1:d38f81081a389f1466ec98192cf9115a82158854d6f01e1c23e2e7554b97db71"
   name = "github.com/rcrowley/go-metrics"
   packages = ["."]
   pruneopts = "UT"
-  revision = "e2704e165165ec55d062f5919b4b29494e9fa790"
+  revision = "3113b8401b8a98917cde58f8bbd42a1b1c03b1fd"
 
 [solve-meta]
   analyzer-name = "dep"
