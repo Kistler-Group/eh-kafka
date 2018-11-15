@@ -55,18 +55,6 @@ func ErrCouldNotPublishEvent(err error) error {
 	return fmt.Errorf("could not unmarshal event: %v", err.Error())
 }
 
-// Error is an async error containing the error and the event.
-type Error struct {
-	Err   error
-	Ctx   context.Context
-	Event eh.Event
-}
-
-// Error implements the Error method of the error interface.
-func (e Error) Error() string {
-	return fmt.Sprintf("%s: (%s)", e.Err, e.Event.String())
-}
-
 // EventBus is an event bus that notifies registered EventHandlers of
 // published events. It will use the SimpleEventHandlingStrategy by default.
 type EventBus struct {
@@ -80,7 +68,7 @@ type EventBus struct {
 
 	registered   map[eh.EventHandlerType]struct{}
 	registeredMu sync.RWMutex
-	errCh        chan Error
+	errCh        chan eh.EventBusError
 }
 
 // NewEventBus creates a EventBus.
@@ -100,7 +88,7 @@ func NewEventBus(brokers []string, config *sarama.Config, timeout time.Duration,
 		consumerTopicsFunc: consumerTopicsFunc,
 		producer:           producer,
 		registered:         map[eh.EventHandlerType]struct{}{},
-		errCh:              make(chan Error, 100),
+		errCh:              make(chan eh.EventBusError, 100),
 	}, nil
 }
 
@@ -154,7 +142,7 @@ func (b *EventBus) AddObserver(m eh.EventMatcher, h eh.EventHandler) {
 }
 
 // Errors returns an error channel where async handling errors are sent.
-func (b *EventBus) Errors() <-chan Error {
+func (b *EventBus) Errors() <-chan eh.EventBusError {
 	return b.errCh
 }
 
@@ -226,7 +214,7 @@ func (b *EventBus) handle(m eh.EventMatcher, h eh.EventHandler, consumer *cluste
 			}
 		case err := <-consumer.Errors():
 			select {
-			case b.errCh <- Error{Err: errors.New("could not receive: " + err.Error())}:
+			case b.errCh <- eh.EventBusError{Err: errors.New("could not receive: " + err.Error())}:
 			default:
 			}
 		}
@@ -242,7 +230,7 @@ func (b *EventBus) handleMessage(m eh.EventMatcher, h eh.EventHandler, consumer 
 	var e evt
 	if err := data.Unmarshal(&e); err != nil {
 		select {
-		case b.errCh <- Error{Err: errors.New("could not unmarshal event: " + err.Error())}:
+		case b.errCh <- eh.EventBusError{Err: errors.New("could not unmarshal event: " + err.Error())}:
 		default:
 		}
 		return
@@ -253,7 +241,7 @@ func (b *EventBus) handleMessage(m eh.EventMatcher, h eh.EventHandler, consumer 
 		// Manually decode the raw BSON event.
 		if err := e.RawData.Unmarshal(data); err != nil {
 			select {
-			case b.errCh <- Error{Err: errors.New("could not unmarshal event data: " + err.Error())}:
+			case b.errCh <- eh.EventBusError{Err: errors.New("could not unmarshal event data: " + err.Error())}:
 			default:
 			}
 			return
@@ -275,7 +263,7 @@ func (b *EventBus) handleMessage(m eh.EventMatcher, h eh.EventHandler, consumer 
 	// Notify all observers about the event.
 	if err := h.HandleEvent(ctx, event); err != nil {
 		select {
-		case b.errCh <- Error{Err: fmt.Errorf("could not handle event (%s): %s", h.HandlerType(), err.Error()), Ctx: ctx, Event: event}:
+		case b.errCh <- eh.EventBusError{Err: fmt.Errorf("could not handle event (%s): %s", h.HandlerType(), err.Error()), Ctx: ctx, Event: event}:
 		default:
 		}
 		return

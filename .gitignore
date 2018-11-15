@@ -30,3 +30,6 @@ vendor/
 
 # CI
 .env
+
+# goland
+.idea/
