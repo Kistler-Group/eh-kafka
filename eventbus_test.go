@@ -48,14 +48,16 @@ func TestEventBus(t *testing.T) {
 
 	timeout := time.Second * 30
 
-	bus1, err := NewEventBus([]string{broker}, config, timeout, func(eh.Event) string { return topic.String() }, func(eh.EventHandler) []string { return []string{topic.String()} })
+	bus1, err := NewEventBus([]string{broker}, config, timeout, func(eh.Event) string { return topic.String() },
+		func(eh.EventHandler) []string { return []string{topic.String()} })
 	if err != nil {
 		t.Fatal("there should be no error:", err)
 	}
 
-	bus2, err := NewEventBus([]string{broker}, config, timeout, func(eh.Event) string { return topic.String() }, func(eh.EventHandler) []string { return []string{topic.String()} })
+	bus2, err := NewEventBus([]string{broker}, config, timeout, func(eh.Event) string { return topic.String() },
+		func(eh.EventHandler) []string { return []string{topic.String()} })
 	if err != nil {
-		t.Fatal("there should be no error:", err)
+		t.Fatal("there should  be no error:", err)
 	}
 
 	eventbus.AcceptanceTest(t, bus1, bus2, timeout)

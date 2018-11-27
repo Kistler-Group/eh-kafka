@@ -69,51 +69,69 @@ type EventBus struct {
 	registered   map[eh.EventHandlerType]struct{}
 	registeredMu sync.RWMutex
 	errCh        chan eh.EventBusError
+
+	eventMarshaller   EventMarshaller
+	eventUnmarshaller EventUnmarshaller
 }
 
+//TopicProducer for define name of topic regarding event type
+type TopicProducer func(event eh.Event) string
+
+//TopicsConsumer for define topic for consumption
+type TopicsConsumer func(event eh.EventHandler) []string
+
+//EventMarshaller eventbus event into specific marshaling format
+type EventMarshaller func(ctx context.Context, event eh.Event) ([]byte, error)
+
+//EventUnmarshaller eventbus event from specific marshaling format
+type EventUnmarshaller func(data []byte) (eh.Event, context.Context, error)
+
 // NewEventBus creates a EventBus.
-func NewEventBus(brokers []string, config *sarama.Config, timeout time.Duration, producerTopicFunc func(event eh.Event) string, consumerTopicsFunc func(event eh.EventHandler) []string) (*EventBus, error) {
+func NewEventBus(brokers []string, config *sarama.Config, timeout time.Duration, topicProducer TopicProducer,
+	topicsConsumer TopicsConsumer) (*EventBus, error) {
+	return NewEventBusWithMarshaller(brokers, config, timeout, topicProducer, topicsConsumer, nil, nil)
+}
+
+// NewEventBusWithMarshaller creates a EventBus.
+func NewEventBusWithMarshaller(brokers []string, config *sarama.Config, timeout time.Duration, topicProducer TopicProducer,
+	topicsConsumer TopicsConsumer, eventMarshaller EventMarshaller, eventUnmarshaller EventUnmarshaller) (*EventBus, error) {
 	config.Producer.Return.Successes = true
 
 	producer, err := sarama.NewSyncProducer(brokers, config)
 	if err != nil {
 		return nil, err
 	}
+	var em EventMarshaller
+	if eventMarshaller == nil {
+		em = defaultMarshal
+	} else {
+		em = eventMarshaller
+	}
+	var eu EventUnmarshaller
+	if eventUnmarshaller == nil {
+		eu = defaultUnmarshal
+	} else {
+		eu = eventUnmarshaller
+	}
 
 	return &EventBus{
 		brokers:            brokers,
 		config:             config,
 		timeout:            timeout,
-		producerTopicFunc:  producerTopicFunc,
-		consumerTopicsFunc: consumerTopicsFunc,
+		producerTopicFunc:  topicProducer,
+		consumerTopicsFunc: topicsConsumer,
 		producer:           producer,
 		registered:         map[eh.EventHandlerType]struct{}{},
 		errCh:              make(chan eh.EventBusError, 100),
+		eventMarshaller:    em,
+		eventUnmarshaller:  eu,
 	}, nil
 }
 
 // PublishEvent publishes an event to all handlers capable of handling it.
 func (b *EventBus) PublishEvent(ctx context.Context, event eh.Event) error {
-	e := evt{
-		AggregateID:   event.AggregateID(),
-		AggregateType: event.AggregateType(),
-		EventType:     event.EventType(),
-		Version:       event.Version(),
-		Timestamp:     event.Timestamp(),
-		Context:       eh.MarshalContext(ctx),
-	}
 
-	// Marshal event data if there is any.
-	if event.Data() != nil {
-		rawData, err := bson.Marshal(event.Data())
-		if err != nil {
-			return errors.New("could not marshal event data: " + err.Error())
-		}
-		e.RawData = bson.Raw{Kind: 3, Data: rawData}
-	}
-
-	// Marshal the event (using BSON for now).
-	data, err := bson.Marshal(e)
+	data, err := b.eventMarshaller(ctx, event)
 	if err != nil {
 		return errors.New("could not marshal event: " + err.Error())
 	}
@@ -222,39 +240,15 @@ func (b *EventBus) handle(m eh.EventMatcher, h eh.EventHandler, consumer *cluste
 }
 
 func (b *EventBus) handleMessage(m eh.EventMatcher, h eh.EventHandler, consumer *cluster.Consumer, msg *sarama.ConsumerMessage) {
-	// Manually decode the raw BSON event.
-	data := bson.Raw{
-		Kind: 3,
-		Data: msg.Value,
-	}
-	var e evt
-	if err := data.Unmarshal(&e); err != nil {
+
+	event, ctx, err := b.eventUnmarshaller(msg.Value)
+	if err != nil {
 		select {
 		case b.errCh <- eh.EventBusError{Err: errors.New("could not unmarshal event: " + err.Error())}:
 		default:
 		}
 		return
 	}
-
-	// Create an event of the correct type.
-	if data, err := eh.CreateEventData(e.EventType); err == nil {
-		// Manually decode the raw BSON event.
-		if err := e.RawData.Unmarshal(data); err != nil {
-			select {
-			case b.errCh <- eh.EventBusError{Err: errors.New("could not unmarshal event data: " + err.Error())}:
-			default:
-			}
-			return
-		}
-
-		// Set concrete event and zero out the decoded event.
-		e.data = data
-		e.RawData = bson.Raw{}
-	}
-
-	event := event{evt: e}
-	ctx := eh.UnmarshalContext(e.Context)
-
 	if !m(event) {
 		consumer.MarkOffset(msg, "")
 		return
@@ -268,7 +262,6 @@ func (b *EventBus) handleMessage(m eh.EventMatcher, h eh.EventHandler, consumer 
 		}
 		return
 	}
-
 	consumer.MarkOffset(msg, "")
 }
 
@@ -323,4 +316,60 @@ func (e event) Version() int {
 // String implements the String method of the eventhorizon.Event interface.
 func (e event) String() string {
 	return fmt.Sprintf("%s@%d", e.evt.EventType, e.evt.Version)
+}
+
+// Marshal event to default bson format
+func defaultMarshal(ctx context.Context, event eh.Event) ([]byte, error) {
+
+	e := evt{
+		AggregateID:   event.AggregateID(),
+		AggregateType: event.AggregateType(),
+		EventType:     event.EventType(),
+		Version:       event.Version(),
+		Timestamp:     event.Timestamp(),
+		Context:       eh.MarshalContext(ctx),
+	}
+
+	// Marshal event data if there is any.
+	if event.Data() != nil {
+		rawData, err := bson.Marshal(event.Data())
+		if err != nil {
+			return nil, errors.New("could not marshal event data: " + err.Error())
+		}
+		e.RawData = bson.Raw{Kind: 3, Data: rawData}
+	}
+
+	// Marshal the event (using BSON for now).
+	data, err := bson.Marshal(e)
+	if err != nil {
+		return nil, errors.New("could not marshal event: " + err.Error())
+	}
+	return data, nil
+}
+
+//Unmarshal event to default bson format
+func defaultUnmarshal(eventContent []byte) (eh.Event, context.Context, error) {
+	// Manually decode the raw BSON event.
+	data := bson.Raw{
+		Kind: 3,
+		Data: eventContent,
+	}
+	var e evt
+	if err := data.Unmarshal(&e); err != nil {
+		return nil, nil, eh.EventBusError{Err: errors.New("could not unmarshal event: " + err.Error())}
+	}
+
+	// Create an event of the correct type.
+	if data, err := eh.CreateEventData(e.EventType); err == nil {
+		// Manually decode the raw BSON event.
+		if err := e.RawData.Unmarshal(data); err != nil {
+			return nil, nil, eh.EventBusError{Err: errors.New("could not unmarshal event data: " + err.Error())}
+		}
+		// Set concrete event and zero out the decoded event.
+		e.data = data
+		e.RawData = bson.Raw{}
+	}
+	event := event{evt: e}
+	ctx := eh.UnmarshalContext(e.Context)
+	return event, ctx, nil
 }
