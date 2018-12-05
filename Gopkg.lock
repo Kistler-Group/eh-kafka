@@ -51,7 +51,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:43571f2cd5b2103074bd2cc37edbb72ee5ee16cf661ed3de0e620d27272fd77e"
+  digest = "1:7fb51688eadf38272411852d7a2b3538c7caff53309abee6c0964a83c00fe69e"
   name = "github.com/globalsign/mgo"
   packages = [
     "bson",
@@ -86,7 +86,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:8aeac803cb5426789cfb294c676394002ec983d28ee26f04755e728430c51ae5"
+  digest = "1:a93df743695fb7668cd525e02d11513b42fc780b348a660a2b452e927eb8cbc2"
   name = "github.com/looplab/eventhorizon"
   packages = [
     ".",
@@ -97,7 +97,7 @@
   revision = "6674e74478cfc2fc1f170d8f8a500f1c8ae87737"
 
 [[projects]]
-  digest = "1:e7e972f4296dba80d993585baa1e1fcb5fbbaa6f5ef36ff7636d9c42ff472bdc"
+  digest = "1:e39a5ee8fcbec487f8fc68863ef95f2b025e0739b0e4aa55558a2b4cf8f0ecf0"
   name = "github.com/pierrec/lz4"
   packages = [
     ".",
